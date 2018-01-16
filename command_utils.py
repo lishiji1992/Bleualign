@@ -47,7 +47,7 @@ def usage():
 
 def load_arguments(sysargv):
     try:
-        opts, args = getopt.getopt(sysargv[1:], "def:ho:s:t:v:", ["factored", "filter=", "filterthreshold=", "filterlang", "printempty", "deveval","eval", "help", "galechurch", "output=", "source=", "target=", "srctotarget=", "targettosrc=", "verbosity="])
+        opts, args = getopt.getopt(sysargv[1:], "def:ho:s:t:v:", ["bleufilter", "bleufilterthreshold=","factored", "filter=", "filterthreshold=", "filterlang", "printempty", "deveval","eval", "help", "galechurch", "output=", "source=", "target=", "srctotarget=", "targettosrc=", "verbosity="])
     except getopt.GetoptError as err:
         # print help information and exit:
         print(str(err)) # will print something like "option -a not recognized"
@@ -116,7 +116,14 @@ def load_arguments(sysargv):
             loglevel = int(a)
             options['loglevel'] = int(a)
             options['verbosity'] = int(a)
+        elif o == '--bleufilter':
+            options['bleufilter'] = True
+        elif o == '--bleufilterthreshold':
+            options['bleufilterthreshold'] = float(a)
+        elif o == '--bleu_ngrams':
+            options['bleu_ngrams'] = int(a)
         else:
+            print('>>>>>>>>>>>>>>>>>>',o)
             assert False, "unhandled option"
 
     if not options['output']:
