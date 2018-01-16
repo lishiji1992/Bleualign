@@ -118,6 +118,10 @@ class Aligner:
         #filterthreshold means choices the higher percentage of alignment
         #set filterlang True, whose when you want to filter alignemts which src is similar to target than translation
         'filter': None, 'filterthreshold': 90, 'filterlang': None,
+
+        #filtering sentences which bleuscore is higher bleufilterthreshold
+        #bleufilterthreshold means choices the higher bleuscore of sentences
+        'bleufilter':False, 'bleufilterthreshold': 0,
         
         #it will print unalignemt pair(zero to one or one to zero pair)
         'printempty': False,
@@ -176,11 +180,12 @@ class Aligner:
       self.out2,self.close_out2=self._outputObjectFromParameter(
             self.options['output-target'], self.options['output'], '-t')
 
-      if self.options['filter']:
+      if self.options['filter'] or self.options['bleufilter']:
         self.out_bad1,self.close_out_bad1=self._outputObjectFromParameter(
             self.options['output-src-bad'], self.options['output'], '-bad-s')
         self.out_bad2,self.close_out_bad2=self._outputObjectFromParameter(
             self.options['output-target-bad'], self.options['output'], '-bad-t')
+
 
     # for passing by string array
     def _stringArray2stringIo(self, stringArray):
@@ -303,8 +308,9 @@ class Aligner:
       if self.options['eval']:
         finalevaluation(results, self.log)
 
-      if self.options['filter']:
+      if self.options['filter'] or self.options['bleufilter']:
         self.write_filtered()
+
 
       self.close_file_streams()
 
@@ -434,7 +440,8 @@ class Aligner:
     # given list of test sentences and list of reference sentences, calculate bleu scores
     #if you want to replace bleu with your own similarity measure, use eval_sents_dummy
     def eval_sents(self,translist,targetlist):
-      
+
+
       scoredict = {}
       cooked_test = {}
       cooked_test2 = {}
@@ -937,19 +944,23 @@ class Aligner:
             sources.append(' '.join([sourcelist[ID] for ID in src]))
             targets.append(' '.join([targetlist[ID] for ID in target]))
 
-        if self.options['filter'] == 'sentences':
+        if self.options['filter'] == 'sentences' or self.options['bleufilter']:
             self.check_sentence_pair(j, sources[-1], translations[-1], targets[-1], sources_output[-1], targets_output[-1], sentscores)
 
-      if self.options['filter'] == 'sentences':
-              self.filter_sentence_pairs(sentscores, sources_output, targets_output)
+
+      if self.options['filter'] == 'sentences' or self.options['bleufilter']:
+           self.filter_sentence_pairs(sentscores, sources_output, targets_output)
 
       if self.options['filter'] == 'articles':
-        self.filter_article_pairs(sources, translations, targets, sources_output, targets_output)
+            self.filter_article_pairs(sources, translations, targets, sources_output, targets_output)
+
+
+
 
       self.log("\nfinished with article",1)
       self.log("\n====================\n",1)
 
-      if self.out1 and self.out2 and not self.options['filter']:
+      if self.out1 and self.out2 and not self.options['filter'] and not self.options['bleufilter']:
         if self.options['factored']:
             self.out1.writelines([line + '\n' for line in sources_factored])
             self.out2.writelines([line + '\n' for line in targets_factored])
@@ -968,11 +979,23 @@ class Aligner:
             self.out_bad2.write(target_out + '\n')
           else:
             if sentscore > 0:
+                sentscorex = self.score_article([target], [trans])
+                #tanslen = len(trans)
+                #targetlen = len(target)
+                # if abs(float(targetlen) - float(tanslen))/float(tanslen) > 0.3:
+                #     newsentscore = 0
+                # else:
+                newsentscore = (2 * sentscore * sentscorex) / (sentscore + sentscorex)
+            else:
+                newsentscore = 0
+            sentscores[j] = newsentscore
+          """else:
+            if sentscore > 0:
               sentscorex = self.score_article([target],[trans])
               newsentscore = (2*sentscore*sentscorex)/(sentscore+sentscorex)
             else:
               newsentscore = 0
-            sentscores[j]=newsentscore
+            sentscores[j]=newsentscore"""
 
 
     # get BLEU score for article pair
@@ -1037,18 +1060,25 @@ class Aligner:
         length = after-before
         totallength += length
         totalscore += articlescore*length
-        
-      averagescore = totalscore/totallength
-      self.log("The average BLEU score is: " + str(averagescore),1)
-      
-      goodlength = totallength*self.options['filterthreshold']/float(100)
+
+      if totallength:
+        averagescore = totalscore/totallength
+        self.log("The average BLEU score is: " + str(averagescore),1)
+        self.log("The bleufilterthreshold is: " + str(self.options['bleufilterthreshold']),1)
+
+
+      if self.options['filter']:
+          goodlength = totallength*self.options['filterthreshold']/float(100)
+      elif self.options['bleufilter']:
+          goodlength = totallength
+
       totallength = 0
       
       bad_percentiles = []
       for i,(articlescore,articlescore2,before,after) in enumerate(self.finalbleu):
         length = after-before
         totallength += length
-        if totallength > goodlength:
+        if self.options['filter'] and totallength > goodlength:
           bad_percentiles = self.finalbleu[i+1:]
           self.log("\nHow about throwing away the following " + self.options['filter'] + "?\n",2)
           self.log(bad_percentiles,2)
@@ -1060,6 +1090,18 @@ class Aligner:
                 self.log(self.targets_out[i],3)
                 self.log('-----------------',3)
           break
+        if self.options['bleufilter'] and articlescore < self.options['bleufilterthreshold']:
+            bad_percentiles = self.finalbleu[i + 1:]
+            self.log("\nThrowing away the following (filter by bleufilterthreshold) " + "\n", 2)
+            self.log(bad_percentiles, 2)
+            if self.options['verbosity'] >= 3:
+                for score, score2, start, end in bad_percentiles:
+                    for i in range(start, end):
+                        self.log(score, 3)
+                        self.log(self.sources_out[i], 3)
+                        self.log(self.targets_out[i], 3)
+                        self.log('-----------------', 3)
+            break
 
       stopwrite = dict([(i[2],1) for i in bad_percentiles])
       resumewrite = dict([(i[3],1) for i in bad_percentiles])
@@ -1077,6 +1119,7 @@ class Aligner:
           else:
             self.out1.write(line + '\n')
             self.out2.write(self.targets_out[i] + '\n')
+
 
     #close all files opened by __init__
     def close_file_streams(self):
